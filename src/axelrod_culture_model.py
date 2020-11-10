@@ -1,150 +1,164 @@
-import pandas as pd
 import random
-import time
-import copy
+from scipy import stats
+from tqdm import tqdm
+import pandas as pd
 
-class Agent(object):
-    def __init__(self, place_i, place_j):
-        self.culture = [random.randint(0, 9) for _ in range(5)]
-        self.place_i = place_i
-        self.place_j = place_j
+# ------------- #
+# parameters
+# ------------- # 
+SIZE = 10 # size of lattice (if SIZE=10, then 10*10 lattice)
+N_TRAITS = 10 # number of traits
+N_FEATURES = 4 # number of features
+TIME = 10000 # number of repeats
+N_AGENTS = SIZE**2 # number of agents which is automatically determined if you decide SIZE
 
-    def return_culture(self):
-        return self.culture
+# example
+# N_TRAITS = 10
+# N_FEATURES = 4
+# [3, 2, 9, 0, 1]
+# each feature is 0 ~ 9
 
-    def return_place_i(self):
-        return self.place_i
+# ------------- #
+# utils
+# ------------- # 
+def _get_agent_position(agent_list, agent):
+    """エージェントリストからエージェントの格子における位置を出す
 
-    def return_place_j(self):
-        return self.place_j
+    Args:
+        agent_list: agentのlist
+        agent: listの中のagent
 
-    def pick_neighbor_agent(self):
-        while True:
-            i_diff, j_diff = random.choice([1, -1]), random.choice([1, -1])
-            i_neighbor = self.place_i+i_diff
-            j_neighbor = self.place_j+j_diff
-            
-            if (0 <= i_neighbor <= 9) and (0 <= j_neighbor <= 9):
-                break
+    Returns:
+        x, y: エージェントの格子における座標位置
+    """
+    index = agent_list.index(agent)
+    x = (index % SIZE) 
+    y = (index // SIZE)
 
-        return i_neighbor, j_neighbor
-    
-    def is_interaction(self, neighbor_agent_culture):
-        similarity = 0
-        for trait_agent, trait_agent_neighbor in zip(self.culture, neighbor_agent_culture):
-            if trait_agent == trait_agent_neighbor:
+    return x, y
+
+def get_neighbor_position(agent_list, agent):
+    agent_x, agent_y = _get_agent_position(agent_list, agent)
+
+    neighbor_left_x, neighbor_left_y = agent_x-1, agent_y
+    neighbor_right_x, neighbor_right_y = agent_x+1, agent_y
+    neighbor_above_x, neighbor_above_y = agent_x, agent_y+1
+    neighbor_below_x, neighbor_below_y = agent_x, agent_y-1
+
+    neighbors_position_list = []
+
+    if (0 <= neighbor_left_x <=(SIZE-1)) and (0 <= neighbor_left_y <=(SIZE-1)):
+        neighbors_position_list.append([neighbor_left_x, neighbor_left_y])
+
+    if (0 <= neighbor_right_x <=(SIZE-1)) and (0 <= neighbor_right_y <=(SIZE-1)):
+        neighbors_position_list.append([neighbor_right_x, neighbor_right_y])
+
+    if (0 <= neighbor_above_x <=(SIZE-1)) and (0 <= neighbor_above_y <=(SIZE-1)):
+        neighbors_position_list.append([neighbor_above_x, neighbor_above_y])
+
+    if (0 <= neighbor_below_x <=(SIZE-1)) and (0 <= neighbor_below_y <=(SIZE-1)):
+        neighbors_position_list.append([neighbor_below_x, neighbor_below_y])
+
+    neighbor_position = random.choice(neighbors_position_list) # pick randomly
+
+    return neighbor_position[0], neighbor_position[1]
+
+def get_list_index_from_position(x, y):
+    return SIZE*y+x
+
+
+# ------------- #
+# agent based model
+# ------------- # 
+class Agent:
+    def __init__(self):
+        self.culture = [random.randint(0, (N_TRAITS-1)) for _ in range(N_FEATURES)]
+
+    def share_culture(self, agent_list):
+        neighbor_x, neighbor_y = get_neighbor_position(agent_list, self)
+        neighbor_index = get_list_index_from_position(neighbor_x, neighbor_y)
+        neighbor_agent = agent_list[neighbor_index]
+
+        similarity = 0 
+        for agent_trait, neighbor_agent_trait in zip(self.culture, neighbor_agent.culture):
+            if agent_trait == neighbor_agent_trait:
                 similarity += 1
-            
-        box = [1 for _ in range(similarity)] + [0 for _ in range(5-similarity)]
-        if random.choice(box) == 1:
-            return True
-        else:
-            return False
+        prob_interact = similarity / N_FEATURES
 
-    def interaction(self, neighbor_agent_culture):
-        while True:
-            pick_trait = random.choice(range(5))
-            if not self.culture[pick_trait] == neighbor_agent_culture[pick_trait]:
-                break
-        self.culture[pick_trait] = neighbor_agent_culture[pick_trait]
+        if stats.bernoulli.rvs(p = prob_interact) == 1: # do share culture
+            different_trait_index_list = []
+            for i, (agent_trait, neighbor_agent_trait) in enumerate(zip(self.culture, neighbor_agent.culture)):
+                if agent_trait != neighbor_agent_trait:
+                    different_trait_index_list.append(i)
 
+            if 1 <= len(different_trait_index_list):
+                different_trait_index = random.choice(different_trait_index_list)
+                neighbor_agent.culture[different_trait_index] = self.culture[different_trait_index]
 
-class CultureDiffusion(object):
-    def __init__(self, time):
-        self.time = time
-        self.agent_list = [Agent(place_i=i, place_j=j) for i in range(10) for j in range(10)]
+class Model:
+    def __init__(self):
+        self.agent_list = [Agent() for _ in range(N_AGENTS)]
+        self.dic = {'0': [self.agent_list[i].culture for i in range(N_AGENTS)]}
 
-    def pick_agent(self):
-        idx = random.choice(range(100))
-        agent = self.agent_list[idx]
-
-        return agent
-
-    def get_neighbor_agent(self, agent):
-        i_neighbor, j_neighbor = agent.pick_neighbor_agent()
-        for candidate in self.agent_list:
-            if (candidate.return_place_i() == i_neighbor) and (candidate.return_place_j() == j_neighbor):
-                neighbor_agent = candidate
-                return neighbor_agent
-                break
-
-    def diffusion(self):
-        for t in range(self.time):
-            agent = self.pick_agent()
-            neighbor_agent = self.get_neighbor_agent(agent)
-            neighbor_agent_culture = neighbor_agent.return_culture()
-
-            if agent.is_interaction(neighbor_agent_culture):
-                agent.interaction(neighbor_agent_culture)
+    def show_lattice(self):
+        for y in range(SIZE):
+            row = []
+            for x in range(SIZE):
+                idx_agent_showed = get_list_index_from_position(x, y)
+                agent_culture_show = self.agent_list[idx_agent_showed].culture
+                row.append(agent_culture_show)
+            print(row)
     
-# main
-evolve = CultureDiffusion(time=1000)
-evolve.diffusion()
-
-
-
-# agent_list = [Agent(place_i=i, place_j=j) for i in range(10) for j in range(10)]
-# idx_picked_agent = random.choice(range(100))
-# agent = agent_list[idx_picked_agent]
-# neighbor_i, neighbor_j = agent.pick_neighbor_agent()
-
-# hoge = agent_list[49]
-
-# def make_agent_culture():
-#     return [random.randint(0, 9) for _ in range(5)]
-
-# def make_site():
-#     site = pd.DataFrame()
-#     for col in range(10):
-#         site[col] = [make_agent_culture() for _ in range(10)]
-#     return site
-
-# def pick_agent(site):
-#     i, j = random.randint(0, 9), random.randint(0, 9)
-#     return i, j, site.iloc[i, j]
-
-# def pick_neighbor(i, j, site):
-#     while True:
-#         i_diff, j_diff = random.choice([1, -1]), random.choice([1, -1])
-#         if (0 <= i+i_diff <= 9) and (0 <= j+j_diff <= 9):
-#             break
-#     return i+i_diff, j+j_diff, site.iloc[i+i_diff, j+j_diff], 
-
-# def is_interaction(agent_selected, agent_neighbor):
-#     similarity = 0
-#     for trait_agent_selected, trait_agent_neighbor in zip(agent_selected, agent_neighbor):
-#         if trait_agent_selected == trait_agent_neighbor:
-#             similarity += 1
-    
-#     box = [1 for _ in range(similarity)] + [0 for _ in range(5-similarity)]
-#     if random.choice(box) == 1:
-#         return True
-#     else:
-#         return False
-
-# def interaction(agent_selected, agent_neighbor):
-#     while True:
-#         pick_trait = random.choice(range(5))
-#         if not agent_selected[pick_trait] == agent_neighbor[pick_trait]:
-#             break
-#     agent_selected[pick_trait] = agent_neighbor[pick_trait]
-
-#     return agent_selected
-
-
-# # main
-# if __name__ == '__main__':
-#     site = make_site()
-#     print(site)
-
-#     for t in range(10):
-#         i, j, agent_selected = pick_agent(site)
-#         i_neighbor, j_neighbor, agent_neighbor = pick_neighbor(i, j, site)
-#         if is_interaction(agent_selected, agent_neighbor):
-#             site.iloc[i, j] = interaction(agent_selected, agent_neighbor)
-#             print(f'happen interaction at {i}, {j} !!')
+    def summarize_lattice(self):
+        culture_list = []
+        for idx in range(N_AGENTS):
+            culture_list.append(self.agent_list[idx].culture)
         
-#         print(t)
-#         time.sleep(0.5)
-    
-#     print(site)
+        unique_culture_list = []
+        for c in culture_list:
+            if c not in unique_culture_list:
+                unique_culture_list.append(c)
+        n_unique_culture = len(unique_culture_list)
+
+        return n_unique_culture
+
+    def get_data(self, t_agent_list, dic, t):
+        key = str(t+1)
+        dic[key] = [t_agent_list[i].culture for i in range(N_AGENTS)]
+
+        return dic
+
+    def simulate(self):
+        list_n_unique_culture = [self.summarize_lattice()] # 初期状態
+
+        for t in tqdm(range(TIME)):
+            agent = self.agent_list[random.randint(0, N_AGENTS-1)] # pick agent randomly
+            agent.share_culture(self.agent_list)
+
+            key = str(t+1)
+            self.dic[key] = [self.agent_list[i].culture for i in range(N_AGENTS)]
+ 
+            list_n_unique_culture.append(self.summarize_lattice())
+
+        df = pd.DataFrame(self.dic)
+        df.to_csv('./df.csv')
+        
+        df = pd.DataFrame({'n_unique_culture': list_n_unique_culture})
+        df.to_csv('./df2.csv')
+
+
+# ------------- #
+# simulation
+# ------------- # 
+model = Model()
+print('======================')
+print('初期状態')
+print('======================')
+model.show_lattice()
+
+model.simulate()
+
+print('======================')
+print('インタラクション後状態')
+print('======================')
+model.show_lattice()
